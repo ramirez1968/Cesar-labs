@@ -1,0 +1,63 @@
+name: Build, Push, and Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "simple-flask-app/**"
+  workflow_dispatch: {}
+
+env:
+  AWS_REGION: us-east-1          # <-- change to your region
+  ECR_REPOSITORY: simple-flask-app
+  EKS_CLUSTER_NAME: your-cluster-name   # <-- change to your EKS cluster name
+  K8S_DEPLOYMENT: simple-flask-app
+  K8S_CONTAINER: simple-flask-app
+
+permissions:
+  id-token: write   # needed for OIDC auth to AWS
+  contents: read
+
+jobs:
+  build-push-deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: simple-flask-app
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+      - name: Deploy new image to EKS
+        run: |
+          kubectl set image deployment/${{ env.K8S_DEPLOYMENT }} \
+            ${{ env.K8S_CONTAINER }}=${{ steps.build-image.outputs.image }} \
+            --record
+
+          kubectl rollout status deployment/${{ env.K8S_DEPLOYMENT }} --timeout=120s

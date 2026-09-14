@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Cesar's Meme Lab</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      body {
+        background: #1a1a2e;
+        color: #eaeaea;
+        font-family:
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+        text-align: center;
+        padding: 40px 16px;
+      }
+      h1 {
+        margin-bottom: 4px;
+      }
+      .subreddit {
+        color: #9a9ac0;
+        margin-bottom: 24px;
+      }
+      img {
+        max-width: 90%;
+        max-height: 70vh;
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+      }
+      .title {
+        margin-top: 20px;
+        font-size: 1.1rem;
+        max-width: 600px;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      a.button {
+        display: inline-block;
+        margin-top: 24px;
+        padding: 10px 20px;
+        background: #6c63ff;
+        color: white;
+        text-decoration: none;
+        border-radius: 8px;
+        font-weight: bold;
+      }
+      a.button:hover {
+        background: #574fd6;
+      }
+      footer {
+        margin-top: 40px;
+        color: #555577;
+        font-size: 0.8rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🐍 Cesar's Meme Lab</h1>
+    <div class="subreddit">from r/{{ meme.subreddit }}</div>
+
+    {% if meme.image_url %}
+    <img src="{{ meme.image_url }}" alt="{{ meme.title }}" />
+    {% else %}
+    <p>No meme available right now — try refreshing.</p>
+    {% endif %}
+
+    <div class="title">{{ meme.title }}</div>
+
+    <div>
+      <a class="button" href="/">🔄 New Meme</a>
+    </div>
+
+    <footer>v{{ version }} · deployed from Cesar's Labs</footer>
+  </body>
+</html>
