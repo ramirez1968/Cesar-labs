@@ -1,0 +1,31 @@
+---
+- name: Provision ECR repository
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yml
+
+  tasks:
+    - name: Create ECR repository
+      community.aws.ecs_ecr:
+        name: "{{ ecr_repository_name }}"
+        region: "{{ aws_region }}"
+        image_tag_mutability: mutable
+        scan_on_push: true
+        state: present
+        lifecycle_policy:
+          rules:
+            - rulePriority: 1
+              description: "Keep last 10 images"
+              selection:
+                tagStatus: any
+                countType: imageCountMoreThan
+                countNumber: 10
+              action:
+                type: expire
+      register: ecr_repo
+
+    - name: Show repository URI
+      ansible.builtin.debug:
+        msg: "ECR repository URI: {{ ecr_repo.repository.repositoryUri }}"

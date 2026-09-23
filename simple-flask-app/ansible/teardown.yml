@@ -1,0 +1,152 @@
+---
+# Tears down everything created by site.yml, in reverse dependency order.
+# Usage: ansible-playbook teardown.yml
+- name: Remove GitHub Actions OIDC role
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yml
+  tasks:
+    - name: Delete inline EKS-describe policy
+      amazon.aws.iam_policy:
+        iam_type: role
+        iam_name: "{{ project_name }}-github-actions"
+        policy_name: eks-describe
+        state: absent
+      ignore_errors: true
+
+    - name: Delete GitHub Actions IAM role
+      amazon.aws.iam_role:
+        name: "{{ project_name }}-github-actions"
+        state: absent
+      ignore_errors: true
+
+- name: Remove EKS node group and cluster
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yml
+  tasks:
+    - name: Delete node group
+      community.aws.eks_nodegroup:
+        name: "{{ project_name }}-nodes"
+        cluster_name: "{{ cluster_name }}"
+        region: "{{ aws_region }}"
+        state: absent
+        wait: true
+      ignore_errors: true
+
+    - name: Delete EKS cluster
+      community.aws.eks_cluster:
+        name: "{{ cluster_name }}"
+        region: "{{ aws_region }}"
+        state: absent
+        wait: true
+      ignore_errors: true
+
+    - name: Delete cluster IAM role
+      amazon.aws.iam_role:
+        name: "{{ project_name }}-eks-cluster-role"
+        state: absent
+      ignore_errors: true
+
+    - name: Delete node IAM role
+      amazon.aws.iam_role:
+        name: "{{ project_name }}-eks-node-role"
+        state: absent
+      ignore_errors: true
+
+- name: Remove ECR repository
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yml
+  tasks:
+    - name: Delete ECR repository (force, even if it has images)
+      community.aws.ecs_ecr:
+        name: "{{ ecr_repository_name }}"
+        region: "{{ aws_region }}"
+        state: absent
+        force_absent: true
+      ignore_errors: true
+
+- name: Remove VPC and networking
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yml
+    - generated_vars.yml
+  tasks:
+    - name: Delete NAT gateway
+      amazon.aws.ec2_vpc_nat_gateway:
+        subnet_id: "{{ public_subnet_ids[0] }}"
+        region: "{{ aws_region }}"
+        state: absent
+        wait: true
+        release_eip: true
+      ignore_errors: true
+
+    - name: Delete public route table
+      amazon.aws.ec2_vpc_route_table:
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ aws_region }}"
+        lookup: tag
+        tags:
+          Name: "{{ project_name }}-public-rt"
+        state: absent
+      ignore_errors: true
+
+    - name: Delete private route table
+      amazon.aws.ec2_vpc_route_table:
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ aws_region }}"
+        lookup: tag
+        tags:
+          Name: "{{ project_name }}-private-rt"
+        state: absent
+      ignore_errors: true
+
+    - name: Delete public subnets
+      amazon.aws.ec2_vpc_subnet:
+        vpc_id: "{{ vpc_id }}"
+        cidr: "{{ item }}"
+        region: "{{ aws_region }}"
+        state: absent
+      loop: "{{ public_subnet_cidrs }}"
+      ignore_errors: true
+
+    - name: Delete private subnets
+      amazon.aws.ec2_vpc_subnet:
+        vpc_id: "{{ vpc_id }}"
+        cidr: "{{ item }}"
+        region: "{{ aws_region }}"
+        state: absent
+      loop: "{{ private_subnet_cidrs }}"
+      ignore_errors: true
+
+    - name: Delete internet gateway
+      amazon.aws.ec2_vpc_igw:
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ aws_region }}"
+        state: absent
+      ignore_errors: true
+
+    - name: Delete VPC
+      amazon.aws.ec2_vpc_net:
+        name: "{{ project_name }}-vpc"
+        cidr_block: "{{ vpc_cidr }}"
+        region: "{{ aws_region }}"
+        state: absent
+      ignore_errors: true
+
+    - name: Remove generated vars files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ playbook_dir }}/generated_vars.yml"
+        - "{{ playbook_dir }}/generated_eks_vars.yml"

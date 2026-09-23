@@ -1,0 +1,108 @@
+---
+- name: Provision VPC and networking for EKS
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yml
+
+  tasks:
+    - name: Create VPC
+      amazon.aws.ec2_vpc_net:
+        name: "{{ project_name }}-vpc"
+        cidr_block: "{{ vpc_cidr }}"
+        region: "{{ aws_region }}"
+        dns_support: true
+        dns_hostnames: true
+        tags:
+          Project: "{{ project_name }}"
+      register: vpc
+
+    - name: Create internet gateway
+      amazon.aws.ec2_vpc_igw:
+        vpc_id: "{{ vpc.vpc.id }}"
+        region: "{{ aws_region }}"
+        state: present
+        tags:
+          Project: "{{ project_name }}"
+      register: igw
+
+    - name: Create public subnets
+      amazon.aws.ec2_vpc_subnet:
+        vpc_id: "{{ vpc.vpc.id }}"
+        cidr: "{{ item.1 }}"
+        az: "{{ item.0 }}"
+        region: "{{ aws_region }}"
+        map_public: true
+        tags:
+          Name: "{{ project_name }}-public-{{ item.0 }}"
+          Project: "{{ project_name }}"
+          "kubernetes.io/role/elb": "1"
+          "kubernetes.io/cluster/{{ cluster_name }}": "shared"
+      loop: "{{ availability_zones | zip(public_subnet_cidrs) | list }}"
+      register: public_subnets
+
+    - name: Create private subnets
+      amazon.aws.ec2_vpc_subnet:
+        vpc_id: "{{ vpc.vpc.id }}"
+        cidr: "{{ item.1 }}"
+        az: "{{ item.0 }}"
+        region: "{{ aws_region }}"
+        map_public: false
+        tags:
+          Name: "{{ project_name }}-private-{{ item.0 }}"
+          Project: "{{ project_name }}"
+          "kubernetes.io/role/internal-elb": "1"
+          "kubernetes.io/cluster/{{ cluster_name }}": "shared"
+      loop: "{{ availability_zones | zip(private_subnet_cidrs) | list }}"
+      register: private_subnets
+
+    - name: Allocate EIP for NAT gateway
+      amazon.aws.ec2_eip:
+        region: "{{ aws_region }}"
+        in_vpc: true
+        tags:
+          Project: "{{ project_name }}"
+      register: nat_eip
+
+    - name: Create single NAT gateway (keeps cost down vs. one per AZ)
+      amazon.aws.ec2_vpc_nat_gateway:
+        subnet_id: "{{ public_subnets.results[0].subnet.id }}"
+        allocation_id: "{{ nat_eip.allocation_id }}"
+        region: "{{ aws_region }}"
+        wait: true
+        tags:
+          Project: "{{ project_name }}"
+      register: nat_gw
+
+    - name: Public route table (routes to IGW)
+      amazon.aws.ec2_vpc_route_table:
+        vpc_id: "{{ vpc.vpc.id }}"
+        region: "{{ aws_region }}"
+        subnets: "{{ public_subnets.results | map(attribute='subnet.id') | list }}"
+        routes:
+          - dest: "0.0.0.0/0"
+            gateway_id: "{{ igw.gateway_id }}"
+        tags:
+          Name: "{{ project_name }}-public-rt"
+          Project: "{{ project_name }}"
+
+    - name: Private route table (routes to NAT)
+      amazon.aws.ec2_vpc_route_table:
+        vpc_id: "{{ vpc.vpc.id }}"
+        region: "{{ aws_region }}"
+        subnets: "{{ private_subnets.results | map(attribute='subnet.id') | list }}"
+        routes:
+          - dest: "0.0.0.0/0"
+            nat_gateway_id: "{{ nat_gw.nat_gateway_id }}"
+        tags:
+          Name: "{{ project_name }}-private-rt"
+          Project: "{{ project_name }}"
+
+    - name: Save network IDs for later playbooks
+      ansible.builtin.copy:
+        dest: "{{ playbook_dir }}/generated_vars.yml"
+        content: |
+          vpc_id: "{{ vpc.vpc.id }}"
+          public_subnet_ids: {{ public_subnets.results | map(attribute='subnet.id') | list }}
+          private_subnet_ids: {{ private_subnets.results | map(attribute='subnet.id') | list }}

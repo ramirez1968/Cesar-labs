@@ -1,0 +1,7 @@
+---
+# Runs the full stack in the correct dependency order.
+# Usage: ansible-playbook site.yml
+- import_playbook: 01-vpc.yml
+- import_playbook: 02-ecr.yml
+- import_playbook: 03-eks.yml
+- import_playbook: 04-github-oidc.yml

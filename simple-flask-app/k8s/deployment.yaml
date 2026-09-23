@@ -18,7 +18,7 @@ spec:
         - name: simple-flask-app
           # Replace with your ECR image URI, e.g.:
           # <account_id>.dkr.ecr.<region>.amazonaws.com/simple-flask-app:latest
-          image: REPLACE_WITH_YOUR_ECR_IMAGE_URI
+          image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/simple-flask-app:latest
           ports:
             - containerPort: 8080
           env:

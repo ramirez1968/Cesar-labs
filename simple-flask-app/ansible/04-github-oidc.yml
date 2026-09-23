@@ -1,0 +1,114 @@
+---
+# No native Ansible module creates an IAM OIDC identity provider, so this
+# playbook shells out to the AWS CLI for that one piece, with an idempotency
+# check first so re-running the playbook doesn't fail or duplicate it.
+- name: Provision GitHub Actions OIDC federation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yml
+    - generated_eks_vars.yml   # created by 03-eks.yml — run that first
+
+  tasks:
+    - name: Get GitHub's current OIDC thumbprint
+      ansible.builtin.command:
+        cmd: >
+          bash -c "openssl s_client -servername token.actions.githubusercontent.com
+          -showcerts -connect token.actions.githubusercontent.com:443 </dev/null 2>/dev/null
+          | openssl x509 -fingerprint -sha1 -noout | sed 's/.*=//; s/://g'"
+      register: gh_thumbprint
+      changed_when: false
+
+    - name: Check if the GitHub OIDC provider already exists
+      ansible.builtin.command:
+        cmd: aws iam list-open-id-connect-providers --output json
+      register: existing_oidc_providers
+      changed_when: false
+
+    - name: Create GitHub OIDC provider (only if not already present)
+      ansible.builtin.command:
+        cmd: >
+          aws iam create-open-id-connect-provider
+          --url https://token.actions.githubusercontent.com
+          --client-id-list sts.amazonaws.com
+          --thumbprint-list {{ gh_thumbprint.stdout }}
+      when: "'token.actions.githubusercontent.com' not in existing_oidc_providers.stdout"
+      register: create_oidc
+      changed_when: true
+
+    - name: Get AWS account ID
+      ansible.builtin.command:
+        cmd: aws sts get-caller-identity --query Account --output text
+      register: aws_account_id
+      changed_when: false
+
+    - name: Create IAM role for GitHub Actions, scoped to this repo
+      amazon.aws.iam_role:
+        name: "{{ project_name }}-github-actions"
+        assume_role_policy_document: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": "arn:aws:iam::{{ aws_account_id.stdout }}:oidc-provider/token.actions.githubusercontent.com"
+              },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+                },
+                "StringLike": {
+                  "token.actions.githubusercontent.com:sub": "repo:{{ github_org }}/{{ github_repo }}:*"
+                }
+              }
+            }]
+          }
+        managed_policies:
+          - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+        state: present
+      register: github_role
+
+    - name: Attach an inline policy for EKS describe access
+      amazon.aws.iam_policy:
+        iam_type: role
+        iam_name: "{{ project_name }}-github-actions"
+        policy_name: eks-describe
+        state: present
+        policy_json: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Action": ["eks:DescribeCluster", "eks:ListClusters"],
+              "Resource": "{{ eks_cluster_arn }}"
+            }]
+          }
+
+    - name: Map the GitHub Actions role to EKS access (so kubectl works from the pipeline)
+      ansible.builtin.command:
+        cmd: >
+          aws eks create-access-entry
+          --cluster-name {{ cluster_name }}
+          --principal-arn {{ github_role.iam_role.arn }}
+          --region {{ aws_region }}
+      register: access_entry
+      failed_when: >
+        access_entry.rc != 0 and 'ResourceInUseException' not in access_entry.stderr
+      changed_when: access_entry.rc == 0
+
+    - name: Associate EKS edit policy with the access entry
+      ansible.builtin.command:
+        cmd: >
+          aws eks associate-access-policy
+          --cluster-name {{ cluster_name }}
+          --principal-arn {{ github_role.iam_role.arn }}
+          --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy
+          --access-scope type=cluster
+          --region {{ aws_region }}
+      changed_when: true
+
+    - name: Show the role ARN to paste into your GitHub secret
+      ansible.builtin.debug:
+        msg: "Add this as GitHub secret AWS_ROLE_ARN: {{ github_role.iam_role.arn }}"

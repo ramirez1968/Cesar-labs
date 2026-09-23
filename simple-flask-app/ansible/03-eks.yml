@@ -1,0 +1,87 @@
+---
+- name: Provision EKS cluster
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yml
+    - generated_vars.yml   # created by 01-vpc.yml — run that first
+
+  tasks:
+    - name: Create IAM role for the EKS control plane
+      amazon.aws.iam_role:
+        name: "{{ project_name }}-eks-cluster-role"
+        assume_role_policy_document: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {"Service": "eks.amazonaws.com"},
+              "Action": "sts:AssumeRole"
+            }]
+          }
+        managed_policies:
+          - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+        state: present
+      register: cluster_role
+
+    - name: Create IAM role for worker nodes
+      amazon.aws.iam_role:
+        name: "{{ project_name }}-eks-node-role"
+        assume_role_policy_document: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {"Service": "ec2.amazonaws.com"},
+              "Action": "sts:AssumeRole"
+            }]
+          }
+        managed_policies:
+          - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+          - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+          - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        state: present
+      register: node_role
+
+    - name: Create EKS cluster
+      community.aws.eks_cluster:
+        name: "{{ cluster_name }}"
+        version: "{{ cluster_version }}"
+        role_arn: "{{ cluster_role.iam_role.arn }}"
+        subnets: "{{ private_subnet_ids }}"
+        region: "{{ aws_region }}"
+        wait: true
+      register: eks
+
+    - name: Create managed node group (small, single node for lab cost)
+      community.aws.eks_nodegroup:
+        name: "{{ project_name }}-nodes"
+        cluster_name: "{{ cluster_name }}"
+        node_role: "{{ node_role.iam_role.arn }}"
+        subnets: "{{ private_subnet_ids }}"
+        region: "{{ aws_region }}"
+        ami_type: AL2_x86_64
+        instance_types:
+          - "{{ node_instance_type }}"
+        scaling_config:
+          min_size: "{{ node_min_size }}"
+          max_size: "{{ node_max_size }}"
+          desired_size: "{{ node_desired_size }}"
+        state: present
+        wait: true
+
+    - name: Update local kubeconfig
+      ansible.builtin.command:
+        cmd: >
+          aws eks update-kubeconfig
+          --region {{ aws_region }}
+          --name {{ cluster_name }}
+      changed_when: true
+
+    - name: Save cluster info for later playbooks
+      ansible.builtin.copy:
+        dest: "{{ playbook_dir }}/generated_eks_vars.yml"
+        content: |
+          eks_cluster_arn: "{{ eks.cluster.arn }}"
+          eks_oidc_issuer_url: "{{ eks.cluster.identity.oidc.issuer }}"
