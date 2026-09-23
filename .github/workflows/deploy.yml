@@ -10,7 +10,7 @@ on:
 env:
   AWS_REGION: us-east-1 # <-- change to your region
   ECR_REPOSITORY: simple-flask-app
-  EKS_CLUSTER_NAME: your-cluster-name # <-- change to your EKS cluster name
+  EKS_CLUSTER_NAME: cesars-labs-eks
   K8S_DEPLOYMENT: simple-flask-app
   K8S_CONTAINER: simple-flask-app
 

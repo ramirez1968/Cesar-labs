@@ -29,8 +29,11 @@ data "aws_iam_policy_document" "github_actions_trust" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      # Restricts to pushes/PRs from this exact repo. Adjust ref filter as needed.
-      values = ["repo:${var.github_org}/${var.github_repo}:*"]
+      # GitHub now embeds numeric owner/repo IDs in the sub claim, e.g.
+      # "repo:owner@OWNER_ID/repo@REPO_ID:ref:refs/heads/main" instead of
+      # the older plain "repo:owner/repo:ref:...". The wildcards after each
+      # name cover both formats without weakening the match to other repos.
+      values = ["repo:${var.github_org}*/${var.github_repo}*:*"]
     }
   }
 }
