@@ -27,13 +27,11 @@ data "aws_iam_policy_document" "github_actions_trust" {
     }
 
     condition {
-      test     = "StringLike"
+      test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      # GitHub now embeds numeric owner/repo IDs in the sub claim, e.g.
-      # "repo:owner@OWNER_ID/repo@REPO_ID:ref:refs/heads/main" instead of
-      # the older plain "repo:owner/repo:ref:...". The wildcards after each
-      # name cover both formats without weakening the match to other repos.
-      values = ["repo:${var.github_org}*/${var.github_repo}*:*"]
+      # GitHub embeds numeric owner/repo IDs in the sub claim, so this is an
+      # exact match: this owner, this repo, and only pushes to main.
+      values = ["repo:${var.github_org}@${var.github_owner_id}/${var.github_repo}@${var.github_repo_id}:ref:refs/heads/main"]
     }
   }
 }

@@ -29,14 +29,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: DEBUG - Print OIDC token claims
-        run: |
-          echo "Requesting OIDC token..."
-          IDTOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
-          echo "Token claims (decoded):"
-          echo $IDTOKEN | cut -d '.' -f2 | base64 -d 2>/dev/null | jq .
-
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:

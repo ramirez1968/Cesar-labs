@@ -63,3 +63,13 @@ variable "github_repo" {
   type        = string
   default     = "Cesar-labs"
 }
+
+variable "github_owner_id" {
+  type    = string
+  default = "160644695"
+}
+
+variable "github_repo_id" {
+  type    = string
+  default = "1366726737"
+}
